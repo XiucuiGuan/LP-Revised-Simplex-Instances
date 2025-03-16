@@ -7,7 +7,7 @@ You can generate random LP instances with 4 variables and 2 constraints, in whic
 
 ## 文件说明
 
-### `revisedsimplex_kimi.txt`
+### `revisedsimplex_kimi.html`
 - **功能**：实现了一个修正单纯形法的演示程序。
 - **特点**：
   - 支持随机生成线性规划问题实例。
@@ -36,7 +36,7 @@ You can generate random LP instances with 4 variables and 2 constraints, in whic
 
 ## 运行方式
 
-1. 将 `revisedsimplex_kimi.txt` 文件下载到本地。
+1. 将 `revisedsimplex_kimi.html` 文件下载到本地。
 2. 使用浏览器打开文件即可运行程序。
 
 ## 依赖
