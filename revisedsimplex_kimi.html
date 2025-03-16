@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>修正单纯形法演示（正确计算版）</title>
+    <style>
+        table { border-collapse: collapse; margin: 20px; }
+        td, th { border: 1px solid black; padding: 8px; text-align: center; }
+        .original-table { background-color: #ffe6e6; }
+        .revised-table { background-color: #e6ffe6; }
+        .final-table { background-color: #ffffe6; }
+        .error { color: red; margin: 10px; }
+        .matrix { display: inline-block; margin: 0 20px; }
+        .warning { color: orange; }
+        .instructions { margin: 20px; padding: 10px; background-color: #f0f0f0; border-radius: 5px; }
+    </style>
+</head>
+<body>
+    <div class="instructions">
+        <h3>使用说明</h3>
+        <ol>
+            <li>点击“生成新问题”按钮，随机生成一个线性规划问题。</li>
+            <li>在输入框中输入入基变量（如x1、x2等），点击“生成中间表格”按钮，显示中间计算结果。</li>
+            <li>在输入框中输入出基变量（如x3、x4等），点击“执行迭代”按钮，进行单纯形法迭代。</li>
+            <li>重复步骤2和3，直到找到最优解。</li>
+        </ol>
+    </div>
+
+     <button onclick="generateNewProblem()">生成新问题</button>
+    <div id="simplexTable"></div>
+    <div id="inputSection" style="display:none;">
+        入基变量：<input type="text" id="enterVar" placeholder="输入变量">
+        <button onclick="showIntermediateTable()">生成中间表格</button>
+        <div id="intermediateTable"></div>
+        出基变量：<input type="text" id="exitVar" placeholder="输入变量">
+        <button onclick="performIteration()">执行迭代</button>
+        <div id="errorMsg" class="error"></div>
+        <div id="warningMsg" class="warning"></div>
+    </div>
+
+<script>
+let originalTable = [];
+let basis = ['x3', 'x4'];
+let B_inv = [[1,0],[0,1]];
+let c_B = [0, 0];
+let history = [];
+let intermediateTableData = null;
+
+function randomInt() {
+    return Math.floor(Math.random() * 5) + 1;
+}
+
+function matrixMultiply(a, b) {
+    const result = new Array(a.length).fill().map(() => new Array(b[0].length).fill(0));
+    for (let i = 0; i < a.length; i++) {
+        for (let j = 0; j < b[0].length; j++) {
+            result[i][j] = a[i].reduce((sum, val, k) => sum + val * b[k][j], 0);
+        }
+    }
+    return result;
+}
+
+function generateNewProblem() {
+    do {
+        originalTable = [
+            [randomInt(), randomInt(), 1, 0, randomInt()*10+30], // RHS≥30保证初始可行
+            [randomInt(), randomInt(), 0, 1, randomInt()*10+30],
+            [-randomInt(), -randomInt(), 0, 0, 0]
+        ];
+    } while (originalTable[2][0] >= 0 && originalTable[2][1] >= 0);
+
+    B_inv = [[1,0], [0,1]];
+    basis = ['x3', 'x4'];
+    c_B = [0, 0];
+    history = [{
+        type: 'original',
+        data: JSON.parse(JSON.stringify(originalTable)),
+        basis: [...basis],
+        B_inv: JSON.parse(JSON.stringify(B_inv))
+    }];
+    
+    document.getElementById('inputSection').style.display = 'block';
+    document.getElementById('errorMsg').textContent = '';
+    document.getElementById('warningMsg').textContent = '';
+    updateDisplay();
+}
+
+function generateRevisedTable(state) {
+    const container = document.createElement('div');
+    try {
+        const b = [[originalTable[0][4]], [originalTable[1][4]]];
+        const currentSolution = matrixMultiply(state.B_inv, b);
+
+        // 显示处理：负值归零
+        currentSolution.forEach((val, i) => {
+            if (val[0] < -1e-6) {
+                document.getElementById('warningMsg').textContent = 
+                    `不可行解！${state.basis[i]} = ${val[0].toFixed(2)}`;
+            }
+        });
+
+        // 计算所有非基变量检验数
+        const nonBasis = ['x1','x2','x3','x4'].filter(x => !basis.includes(x));
+        const sigma = {};
+        nonBasis.forEach(varName => {
+            const j = ['x1','x2','x3','x4'].indexOf(varName);
+            const A_j = [[originalTable[0][j]], [originalTable[1][j]]];
+            
+            // 正确计算检验数：c_j - c_B * B⁻¹ * A_j
+            const cB_Binv = matrixMultiply([c_B], state.B_inv);
+            const zj = matrixMultiply(cB_Binv, A_j)[0][0];
+            sigma[varName] = originalTable[2][j] - zj;
+        });
+
+        const table = document.createElement('table');
+        table.className = 'revised-table';
+        
+        // 表头
+        const header = table.insertRow();
+        ['基变量', 'B⁻¹', '当前解', ...nonBasis.map(v => `σ${v}`), 'Z值'].forEach(h => {
+            header.insertCell().textContent = h;
+        });
+
+        const dataRow = table.insertRow();
+        dataRow.insertCell().textContent = basis.join(', ');
+        
+        // 基逆矩阵显示
+        const invCell = dataRow.insertCell();
+        const invTable = document.createElement('table');
+        invTable.className = 'matrix';
+        state.B_inv.forEach(row => {
+            const tr = invTable.insertRow();
+            row.forEach(cell => {
+                tr.insertCell().textContent = Math.abs(cell) < 1e-6 ? '0' : cell.toFixed(2);
+            });
+        });
+        invCell.appendChild(invTable);
+
+        // 当前解显示
+        const solutionCell = dataRow.insertCell();
+        const solutionTable = document.createElement('table');
+        solutionTable.className = 'matrix';
+        currentSolution.forEach(val => {
+            const tr = solutionTable.insertRow();
+            const displayVal = val[0] < 1e-6 ? 0 : val[0].toFixed(2);
+            tr.insertCell().textContent = displayVal;
+        });
+        solutionCell.appendChild(solutionTable);
+
+        // 检验数显示
+        nonBasis.forEach(v => {
+            dataRow.insertCell().textContent = sigma[v].toFixed(2);
+        });
+
+        // Z值计算
+        const zValue = matrixMultiply(matrixMultiply([c_B], state.B_inv), b)[0][0];
+        dataRow.insertCell().textContent = zValue.toFixed(2);
+
+        container.appendChild(table);
+    } catch (e) {
+        console.error('生成修正表时出错:', e);
+    }
+    return container;
+}
+
+function updateDisplay() {
+    const output = document.getElementById('simplexTable');
+    output.innerHTML = '';
+    
+    history.forEach((state, idx) => {
+        const section = document.createElement('div');
+        const label = document.createElement('h4');
+        label.textContent = idx === 0 ? '初始单纯形表' : `迭代${idx}`;
+        section.appendChild(label);
+
+        if (state.type === 'original') {
+            const table = document.createElement('table');
+            table.className = 'original-table';
+            const header = table.insertRow();
+            ['Basis','x1','x2','x3','x4','RHS'].forEach(h => header.insertCell().textContent = h);
+            
+            state.data.slice(0,2).forEach((row, i) => {
+                const tr = table.insertRow();
+                tr.insertCell().textContent = state.basis[i];
+                row.forEach(v => tr.insertCell().textContent = v);
+            });
+            
+            const zRow = table.insertRow();
+            zRow.insertCell().textContent = 'Z';
+            state.data[2].forEach(v => zRow.insertCell().textContent = v);
+            
+            section.appendChild(table);
+        } else {
+            section.appendChild(generateRevisedTable(state));
+        }
+        output.appendChild(section);
+    });
+}
+
+function showIntermediateTable() {
+    const errorMsg = document.getElementById('errorMsg');
+    errorMsg.textContent = '';
+    
+    try {
+        const enterVar = document.getElementById('enterVar').value.trim().toLowerCase();
+        if (!['x1','x2','x3','x4'].includes(enterVar)) throw new Error('入基变量只能是x1、x2、x3或x4');
+
+        const enterIndex = ['x1','x2','x3','x4'].indexOf(enterVar);
+        const A_k = [[originalTable[0][enterIndex]], [originalTable[1][enterIndex]]];
+        const enterCol = matrixMultiply(B_inv, A_k);
+        const b = [[originalTable[0][4]], [originalTable[1][4]]];
+        const rightSide = matrixMultiply(B_inv, b);
+
+        const table = document.createElement('table');
+        table.className = 'revised-table';
+        
+        const header = table.insertRow();
+        ['基变量', '入基列', '右端列'].forEach(h => {
+            header.insertCell().textContent = h;
+        });
+
+        const dataRow = table.insertRow();
+        dataRow.insertCell().textContent = basis.join(', ');
+        
+        const enterColCell = dataRow.insertCell();
+        const enterColTable = document.createElement('table');
+        enterColTable.className = 'matrix';
+        enterCol.forEach(val => {
+            const tr = enterColTable.insertRow();
+            tr.insertCell().textContent = val[0].toFixed(2);
+        });
+        enterColCell.appendChild(enterColTable);
+
+        const rightSideCell = dataRow.insertCell();
+        const rightSideTable = document.createElement('table');
+        rightSideTable.className = 'matrix';
+        rightSide.forEach(val => {
+            const tr = rightSideTable.insertRow();
+            tr.insertCell().textContent = val[0].toFixed(2);
+        });
+        rightSideCell.appendChild(rightSideTable);
+
+        document.getElementById('intermediateTable').innerHTML = '';
+        document.getElementById('intermediateTable').appendChild(table);
+        
+        intermediateTableData = {
+            enterVar: enterVar,
+            enterCol: enterCol,
+            rightSide: rightSide
+        };
+    } catch (e) {
+        errorMsg.textContent = '错误: ' + e.message;
+        console.error('生成中间表格出错:', e);
+    }
+}
+
+function performIteration() {
+    const errorMsg = document.getElementById('errorMsg');
+    errorMsg.textContent = '';
+    document.getElementById('warningMsg').textContent = '';
+    
+    try {
+        if (!intermediateTableData) throw new Error('请先生成中间表格');
+        
+        const enterVar = intermediateTableData.enterVar;
+        const enterIndex = ['x1','x2','x3','x4'].indexOf(enterVar);
+        const enterCol = intermediateTableData.enterCol;
+        const rightSide = intermediateTableData.rightSide;
+        
+        const exitVar = document.getElementById('exitVar').value.trim().toLowerCase();
+        if (!basis.includes(exitVar)) throw new Error('出基变量不在当前基中');
+        const exitRow = basis.indexOf(exitVar);
+        
+        const pivot = enterCol[exitRow][0];
+        if (pivot === 0) throw new Error('枢轴元素不能为0');
+        
+        // 更新基逆矩阵（正确eta矩阵计算）
+        const eta = B_inv.map((row, i) => 
+            row.map((_, j) => 
+                i === exitRow ? 
+                row[j]/pivot : 
+                row[j] - (enterCol[i][0]/pivot)*B_inv[exitRow][j]
+            )
+        );
+        B_inv = matrixMultiply(eta, B_inv);
+        
+        // 更新基变量
+        basis[exitRow] = enterVar;
+        c_B[exitRow] = originalTable[2][enterIndex];
+        
+        history.push({
+            type: 'revised',
+            basis: [...basis],
+            B_inv: JSON.parse(JSON.stringify(B_inv))
+        });
+        
+        updateDisplay();
+        checkOptimality();
+    } catch (e) {
+        errorMsg.textContent = '错误: ' + e.message;
+        console.error('迭代出错:', e);
+    }
+}
+
+function checkOptimality() {
+    try {
+        const nonBasis = ['x1','x2','x3','x4'].filter(x => !basis.includes(x));
+        const isOptimal = nonBasis.every(varName => {
+            const j = ['x1','x2','x3','x4'].indexOf(varName);
+            const A_j = [[originalTable[0][j]], [originalTable[1][j]]];
+            const cB_Binv = matrixMultiply([c_B], B_inv);
+            const zj = matrixMultiply(cB_Binv, A_j)[0][0];
+            return (originalTable[2][j] - zj) >= -1e-6;
+        });
+
+        if (isOptimal) {
+            const finalDiv = document.createElement('div');
+            finalDiv.innerHTML = '<h4 style="color:green; margin:20px">已找到最优解！</h4>';
+            document.getElementById('simplexTable').appendChild(finalDiv);
+            document.getElementById('inputSection').style.display = 'none';
+        }
+    } catch (e) {
+        console.error('最优性检查出错:', e);
+    }
+}
+</script>
+</body>
+</html>
